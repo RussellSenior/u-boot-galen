@@ -1,0 +1,74 @@
+string 'Cross Compiler Path' CONFIG_CROSS_COMPILER_PATH  /opt/buildroot-gcc342/bin
+comment ""
+
+mainmenu_name 'Uboot Configuration'
+choice 'Chip Type' "ASIC ASIC_BOARD"
+choice 'Chip ID' " RT5350 RT5350_ASIC_BOARD"
+
+#########################################################################################3
+# RT5350
+#########################################################################################3
+if [ "$RT5350_FPGA_BOARD" = "y" -o "$RT5350_ASIC_BOARD" = "y" ]; then
+
+define_bool RT5350_MP y
+
+#-----------------------
+# RT5350 GMAC
+#-----------------------
+define_bool P5_MAC_TO_NONE_MODE y
+
+#-----------------------
+# RT5350 FLASH
+#-----------------------
+define_bool ON_BOARD_SPI_FLASH_COMPONENT y
+define_bool UBOOT_RAM y
+
+if [ "$DUAL_IMAGE_SUPPORT" = "y" ]; then
+choice 'Flash Size' "4M ON_BOARD_4M_FLASH_COMPONENT \
+                     8M ON_BOARD_8M_FLASH_COMPONENT \
+                     16M ON_BOARD_16M_FLASH_COMPONENT 
+		    " 4M
+fi
+
+#-----------------------
+# RT5350 DRAM
+#-----------------------
+define_bool ON_BOARD_SDR y
+
+choice 'DRAM Component' "128Mb ON_BOARD_128M_DRAM_COMPONENT \
+                         256Mb ON_BOARD_256M_DRAM_COMPONENT \
+                         512Mb ON_BOARD_512M_DRAM_COMPONENT 
+		      " 256Mb
+
+define_bool ON_BOARD_16BIT_DRAM_BUS y
+
+#-----------------------
+# RT5350 Option
+#-----------------------
+comment ""
+bool "Dual Image" DUAL_IMAGE_SUPPORT
+bool "Partition LAN/WAN" LAN_WAN_PARTITION
+if [ "$LAN_WAN_PARTITION" = "y" ]; then
+ choice 'LAN/WAN Board Layout' "W/LLLL RALINK_DEMO_BOARD_PVLAN \
+		                LLLL/W RALINK_EV_BOARD_PVLAN 
+			       "
+fi
+bool "Static DRAM Parameter" DRAM_PARAMETERS
+if [ "$DRAM_PARAMETERS" = "y" ]; then
+if [ "$ON_BOARD_SDR" = "y" ]; then
+hex " SDRAM_CFG0"	DRAM_CFG0	0
+hex " SDRAM_CFG1"	DRAM_CFG1	0
+else
+hex " SYSCFG1(hex)"		DRAM_CFG0	26
+hex " DDR_CFG3_ODT(hex)"	DRAM_CFG1	2
+fi
+fi
+
+bool "CPU PLL adjustment" CPU_PLL_PARAMETERS
+if [ "$CPU_PLL_PARAMETERS" = "y" ]; then
+hex " CPU PLL ADJUSTMENT "	CPUPLLCFG	0
+fi
+
+define_hex TEXT_BASE  0x80200000
+
+fi

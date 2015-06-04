@@ -74,7 +74,9 @@
 #include "bootp.h"
 #include "tftp.h"
 #include "rarp.h"
-#include "nfs.h"
+//#include "nfs.h"
+#include <asm/addrspace.h>
+#undef DEBUG
 #ifdef CONFIG_STATUS_LED
 #include <status_led.h>
 #include <miiphy.h>
@@ -153,7 +155,13 @@ void NcStart(void);
 int nc_input_packet(uchar *pkt, unsigned dest, unsigned src, unsigned len);
 #endif
 
-volatile uchar	PktBuf[(PKTBUFSRX+1) * PKTSIZE_ALIGN + PKTALIGN];
+  
+volatile uchar	*PktBuf;
+	
+volatile uchar	Pkt_Buf_Pool[(PKTBUFSRX+2) * PKTSIZE_ALIGN + PKTALIGN];
+
+//FRANK request
+//
 
 volatile uchar *NetRxPackets[PKTBUFSRX]; /* Receive packets			*/
 
@@ -175,6 +183,22 @@ int		NetArpWaitTxPacketSize;
 uchar 		NetArpWaitPacketBuf[PKTSIZE_ALIGN + PKTALIGN];
 ulong		NetArpWaitTimerStart;
 int		NetArpWaitTry;
+
+
+//===================================================
+/*=======================================*/
+
+
+
+
+extern VALID_BUFFER_STRUCT  rt2880_free_buf_list;
+//kaiker
+extern BUFFER_ELEM *rt2880_free_buf_entry_dequeue(VALID_BUFFER_STRUCT *hdr);
+
+
+
+/*=======================================*/
+//===================================================
 
 void ArpRequest (void)
 {
@@ -236,6 +260,7 @@ void ArpTimeoutCheck(void)
 			NetStartAgain();
 		} else {
 			NetArpWaitTimerStart = t;
+			puts("\nArpTimeoutCheck \n");
 			ArpRequest();
 		}
 	}
@@ -245,6 +270,7 @@ void ArpTimeoutCheck(void)
 /*
  *	Main network processing loop.
  */
+
 
 int
 NetLoop(proto_t protocol)
@@ -264,7 +290,35 @@ NetLoop(proto_t protocol)
 	NetArpWaitPacketIP = 0;
 	NetArpWaitReplyIP = 0;
 	NetArpWaitTxPacket = NULL;
-	NetTxPacket = NULL;
+#ifdef DEBUG	
+   printf("File: %s, Func: %s, Line: %d\n", __FILE__,__FUNCTION__ , __LINE__);
+#endif   
+//
+#if 1
+	if (!NetTxPacket) {
+		int	i;
+		BUFFER_ELEM *buf;
+		/*
+		 *	Setup packet buffers, aligned correctly.
+		 */
+		buf = rt2880_free_buf_entry_dequeue(&rt2880_free_buf_list); 
+		NetTxPacket = buf->pbuf;
+
+		debug("\n NetTxPacket = 0x%08X \n",NetTxPacket);
+		for (i = 0; i < NUM_RX_DESC; i++) {
+
+			buf = rt2880_free_buf_entry_dequeue(&rt2880_free_buf_list); 
+			if(buf == NULL)
+			{
+				printf("\n Packet Buffer is empty ! \n");
+
+				return (-1);
+			}
+			NetRxPackets[i] = buf->pbuf;
+			//printf("\n NetRxPackets[%d] = 0x%08X\n",i,NetRxPackets[i]);
+		}
+	}
+#else
 
 	if (!NetTxPacket) {
 		int	i;
@@ -273,23 +327,37 @@ NetLoop(proto_t protocol)
 		 */
 		NetTxPacket = &PktBuf[0] + (PKTALIGN - 1);
 		NetTxPacket -= (ulong)NetTxPacket % PKTALIGN;
+
+		printf("\n NetTxPacket = 0x%08X \n",NetTxPacket);
 		for (i = 0; i < PKTBUFSRX; i++) {
 			NetRxPackets[i] = NetTxPacket + (i+1)*PKTSIZE_ALIGN;
+			printf("\n NetRxPackets[%d] = 0x%08X\n",i,NetRxPackets[i]);
 		}
 	}
+#endif
+
+
+	
+	NetTxPacket = KSEG1ADDR(NetTxPacket);
+
+	printf("\n KSEG1ADDR(NetTxPacket) = 0x%08X \n",NetTxPacket);
 
 	if (!NetArpWaitTxPacket) {
 		NetArpWaitTxPacket = &NetArpWaitPacketBuf[0] + (PKTALIGN - 1);
 		NetArpWaitTxPacket -= (ulong)NetArpWaitTxPacket % PKTALIGN;
 		NetArpWaitTxPacketSize = 0;
 	}
-
+	printf("\n NetLoop,call eth_halt ! \n");
 	eth_halt();
 #ifdef CONFIG_NET_MULTI
 	eth_set_current();
 #endif
+	printf("\n NetLoop,call eth_init ! \n");
 	if (eth_init(bd) < 0)
+	{
+	    printf("\n eth_init is fail !!\n");
 		return(-1);
+	}	
 
 restart:
 #ifdef CONFIG_NET_MULTI
@@ -332,6 +400,7 @@ restart:
 #if (CONFIG_COMMANDS & CFG_CMD_PING)
 		case PING:
 			/* nothing */
+			printf("\n Ping,nothing!\n");
 			break;
 #endif
 		default:
@@ -388,6 +457,7 @@ restart:
 			break;
 #endif /* CFG_CMD_DHCP */
 
+#if 0
 		case BOOTP:
 			BootpTry = 0;
 			BootpRequest ();
@@ -397,6 +467,7 @@ restart:
 			RarpTry = 0;
 			RarpRequest ();
 			break;
+#endif
 #if (CONFIG_COMMANDS & CFG_CMD_PING)
 		case PING:
 			PingStart();
@@ -442,7 +513,7 @@ restart:
 	 *	Main packet reception loop.  Loop receiving packets until
 	 *	someone sets `NetQuit'.
 	 */
-	for (;;) {
+	for (;;) {		
 		WATCHDOG_RESET();
 #ifdef CONFIG_SHOW_ACTIVITY
 		{
@@ -562,7 +633,7 @@ void NetStartAgain (void)
 	if (NetRestartWrap) {
 		NetRestartWrap = 0;
 		if (NetDevExists && !once) {
-			NetSetTimeout (10 * CFG_HZ, startAgainTimeout);
+			NetSetTimeout (10UL * CFG_HZ, startAgainTimeout);
 			NetSetHandler (startAgainHandler);
 		} else {
 			NetState = NETLOOP_FAIL;
@@ -623,6 +694,7 @@ NetSendUDPPacket(uchar *ether, IPaddr_t dest, int dport, int sport, int len)
 #ifdef ET_DEBUG
 		printf("sending ARP for %08lx\n", dest);
 #endif
+
 		NetArpWaitPacketIP = dest;
 		NetArpWaitPacketMAC = ether;
 
@@ -672,7 +744,7 @@ int PingSend(void)
 #ifdef ET_DEBUG
 	printf("sending ARP for %08lx\n", NetPingIP);
 #endif
-
+	printf("kaiker,PingSend, sending ARP for %08lx\n", NetPingIP);
 	NetArpWaitPacketIP = NetPingIP;
 	NetArpWaitPacketMAC = mac;
 
@@ -1117,7 +1189,10 @@ NetReceive(volatile uchar * inpkt, int len)
 
 	/* too small packet? */
 	if (len < ETHER_HDR_SIZE)
+	{
+		printf("\n en[%d] < ETHER_HDR_SIZE\n",len);
 		return;
+	}	
 
 #if (CONFIG_COMMANDS & CFG_CMD_CDP)
 	/* keep track if packet is CDP */
@@ -1216,31 +1291,35 @@ NetReceive(volatile uchar * inpkt, int len)
 			return;
 		}
 		if (ntohs(arp->ar_hrd) != ARP_ETHER) {
+			printf("\n ntohs(arp->ar_hrd) != ARP_ETHER\n");
 			return;
 		}
 		if (ntohs(arp->ar_pro) != PROT_IP) {
+			printf("\n ntohs(arp->ar_pro) != PROT_IP\n");
 			return;
 		}
 		if (arp->ar_hln != 6) {
+			printf("\n arp->ar_hln != 6 \n");
 			return;
 		}
 		if (arp->ar_pln != 4) {
+			printf("\n arp->ar_pln != 4 \n");
 			return;
 		}
 
 		if (NetOurIP == 0) {
+			printf("\n NetOurIP \n");
 			return;
 		}
 
 		if (NetReadIP(&arp->ar_data[16]) != NetOurIP) {
+			//printf("\n (NetReadIP(&arp->ar_data[16]) != NetOurIP)  \n");
 			return;
 		}
 
 		switch (ntohs(arp->ar_op)) {
 		case ARPOP_REQUEST:		/* reply with our IP address	*/
-#ifdef ET_DEBUG
 			puts ("Got ARP REQUEST, return our IP\n");
-#endif
 			pkt = (uchar *)et;
 			pkt += NetSetEther(pkt, et->et_src, PROT_ARP);
 			arp->ar_op = htons(ARPOP_REPLY);
@@ -1255,35 +1334,37 @@ NetReceive(volatile uchar * inpkt, int len)
 			/* are we waiting for a reply */
 			if (!NetArpWaitPacketIP || !NetArpWaitPacketMAC)
 				break;
-#ifdef ET_DEBUG
+			
 			printf("Got ARP REPLY, set server/gtwy eth addr (%02x:%02x:%02x:%02x:%02x:%02x)\n",
 				arp->ar_data[0], arp->ar_data[1],
 				arp->ar_data[2], arp->ar_data[3],
 				arp->ar_data[4], arp->ar_data[5]);
-#endif
 
 			tmp = NetReadIP(&arp->ar_data[6]);
 
 			/* matched waiting packet's address */
 			if (tmp == NetArpWaitReplyIP) {
-#ifdef ET_DEBUG
 				puts ("Got it\n");
-#endif
+
 				/* save address for later use */
 				memcpy(NetArpWaitPacketMAC, &arp->ar_data[0], 6);
 
 #ifdef CONFIG_NETCONSOLE
 				(*packetHandler)(0,0,0,0);
 #endif
-				/* modify header, and transmit it */
-				memcpy(((Ethernet_t *)NetArpWaitTxPacket)->et_dest, NetArpWaitPacketMAC, 6);
-				(void) eth_send(NetArpWaitTxPacket, NetArpWaitTxPacketSize);
 
 				/* no arp request pending now */
 				NetArpWaitPacketIP = 0;
 				NetArpWaitTxPacketSize = 0;
 				NetArpWaitPacketMAC = NULL;
 
+				/* if Arp response requested by TFTP,
+				 * send "TFTP Read Request" packet 
+				 * immediately */
+				extern int TftpStarted;
+				if(TftpStarted == 1) {
+				    TftpSend ();
+				}
 			}
 			return;
 		default:
@@ -1400,6 +1481,7 @@ NetReceive(volatile uchar * inpkt, int len)
 						ntohs(ip->udp_src),
 						ntohs(ip->udp_len) - 8);
 #endif
+
 		/*
 		 *	IP header OK.  Pass the packet to the current handler.
 		 */
@@ -1493,10 +1575,11 @@ unsigned
 NetCksum(uchar * ptr, int len)
 {
 	ulong	xsum;
+	ushort *p = (ushort *)ptr;
 
 	xsum = 0;
 	while (len-- > 0)
-		xsum += *((ushort *)ptr)++;
+		xsum += *p++;
 	xsum = (xsum & 0xffff) + (xsum >> 16);
 	xsum = (xsum & 0xffff) + (xsum >> 16);
 	return (xsum & 0xffff);
