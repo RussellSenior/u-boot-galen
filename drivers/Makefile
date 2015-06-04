@@ -27,7 +27,11 @@ include $(TOPDIR)/config.mk
 
 LIB	= libdrivers.a
 
-OBJS	= rt2880_eth.o i2c_drv.o mii_mgr.o
+OBJS	= rt2880_eth.o #i2c_drv.o
+
+ifeq ($(RALINK_MDIO_ACCESS_FUN),ON)
+OBJS	+= mii_mgr.o
+endif
 
 ifeq ($(CFG_ENV_IS), IN_FLASH)
 OBJS	+= spi_drv.o 
@@ -57,6 +61,13 @@ endif
 
 ifeq ($(RALINK_EHCI), ON)
 OBJS	+= ehci-hcd.o ehci-ra.o
+endif
+ 
+ifeq ($(RALINK_EPHY_TESTER), ON)
+OBJS   += phy_val.o 
+endif
+ifeq ($(MTK_MSDC), ON)
+OBJS	+= msdc/mmc_core.o msdc/mmc_test.o msdc/msdc.o msdc/msdc_cust.o msdc/ts_msdc.o
 endif
 
 all:	$(LIB)

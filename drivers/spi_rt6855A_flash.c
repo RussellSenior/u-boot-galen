@@ -3,23 +3,14 @@
 #include <rt_mmap.h>
 #include <configs/rt2880.h>
 #include <malloc.h>
-#if defined (RT6855A_ASIC_BOARD) || defined (RT6855A_FPGA_BOARD)
 #include "bbu_spiflash.h"
-#else
-#include "ralink_spi.h"
-#endif
 
 
 #if (CONFIG_COMMANDS & CFG_CMD_SPI) 
 
 /* Choose the SPI flash mode */
-#if defined (RT6855A_ASIC_BOARD) || defined (RT6855A_FPGA_BOARD)
 #define BBU_MODE		// BBU SPI flash controller
 #define MORE_BUF_MODE
-#else
-#define USER_MODE		// SPI flash user mode support by default
-//#define COMMAND_MODE		// SPI flash command mode support
-#endif
 
 #if !defined USER_MODE && !defined COMMAND_MODE && !defined BBU_MODE
 #error "Please choose the correct mode of SPI flash controller"
@@ -30,7 +21,6 @@
  ******************************************************************************/
 
 #define FLASH_PAGESIZE		256
-#define MX_4B_MODE			/* MXIC 4 Byte Mode */
 
 /* Flash opcodes. */
 #define OPCODE_WREN		6	/* Write enable */
@@ -68,6 +58,9 @@
 #define SR_EPE			0x20	/* Erase/Program error */
 #define SR_SRWD			0x80	/* SR write protect */
 
+#define OPCODE_BRRD		0x16
+#define OPCODE_BRWR		0x17
+
 #define ra_dbg(args...)
 /*#define ra_dbg(args...) do { if (1) printf(args); } while(0)*/
 
@@ -91,6 +84,7 @@
 #define SPIC_4B_ADDR (1<<3)
 
 
+static int raspi_wait_ready(int sleep_ms);
 #if defined USER_MODE || defined COMMAND_MODE
 static unsigned int spi_wait_nsec = 0;
 static int spic_busy_wait(void)
@@ -256,13 +250,13 @@ static struct chip_info chips_data [] = {
 	{ "MX25L3205D",		0xc2, 0x2016c220, 64 * 1024, 64,  0 },
 	{ "MX25L6405D",		0xc2, 0x2017c220, 64 * 1024, 128, 0 },
 	{ "MX25L12805D",	0xc2, 0x2018c220, 64 * 1024, 256, 0 },
-#ifdef MX_4B_MODE 
 	{ "MX25L25635E",	0xc2, 0x2019c220, 64 * 1024, 512, 1 },
-#endif
+	{ "S25FL256S",		0x01, 0x02194D01, 64 * 1024, 512, 1 },
 	{ "S25FL128P",		0x01, 0x20180301, 64 * 1024, 256, 0 },
 	{ "S25FL129P",		0x01, 0x20184D01, 64 * 1024, 256, 0 },
 	{ "S25FL032P",		0x01, 0x02154D00, 64 * 1024, 64,  0 },
 	{ "S25FL064P",		0x01, 0x02164D00, 64 * 1024, 128, 0 },
+	{ "F25L64QA",           0x8c, 0x41170000, 64 * 1024, 128, 0 }, //ESMT
 	{ "EN25F16",		0x1c, 0x31151c31, 64 * 1024, 32,  0 },
 	{ "EN25F32",		0x1c, 0x31161c31, 64 * 1024, 64,  0 },
 	{ "EN25Q32",            0x1c, 0x30161c30, 64 * 1024, 64,  0 },
@@ -441,24 +435,20 @@ static int bbu_mb_spic_trans(const u8 code, const u32 addr, u8 *buf, const size_
 	bbu_spic_busy_wait();
 
 	/* step 1. set opcode & address, and fix cmd bit count to 32 (or 40) */
-#ifdef MX_4B_MODE 
 	if (spi_chip_info && spi_chip_info->addr4b) {
 		ra_and(SPI_REG_CTL, ~SPI_CTL_ADDREXT_MASK);
 		ra_or(SPI_REG_CTL, (code << 24) & SPI_CTL_ADDREXT_MASK);
 		ra_outl(SPI_REG_OPCODE, addr);
 	}
 	else
-#endif
 	{
 		ra_outl(SPI_REG_OPCODE, (code << 24) & 0xff000000);
 		ra_or(SPI_REG_OPCODE, (addr & 0xffffff));
 	}
 	ra_and(SPI_REG_MOREBUF, ~SPI_MBCTL_CMD_MASK);
-#ifdef MX_4B_MODE 
 	if (spi_chip_info && spi_chip_info->addr4b)
 		ra_or(SPI_REG_MOREBUF, (40 << 24));
 	else
-#endif
 		ra_or(SPI_REG_MOREBUF, (32 << 24));
 
 	/* step 2. write DI/DO data #0 ~ #7 */
@@ -520,12 +510,10 @@ static int bbu_spic_trans(const u8 code, const u32 addr, u8 *buf, const size_t n
 	bbu_spic_busy_wait();
 
 	/* step 1. set opcode & address */
-#ifdef MX_4B_MODE 
 	if (spi_chip_info && spi_chip_info->addr4b) {
 		ra_and(SPI_REG_CTL, ~SPI_CTL_ADDREXT_MASK);
 		ra_or(SPI_REG_CTL, addr & SPI_CTL_ADDREXT_MASK);
 	}
-#endif
 	ra_outl(SPI_REG_OPCODE, ((addr & 0xffffff) << 8));
 	ra_or(SPI_REG_OPCODE, code);
 
@@ -556,11 +544,9 @@ static int bbu_spic_trans(const u8 code, const u32 addr, u8 *buf, const size_t n
 	/* step 3. set mosi_byte_cnt */
 	ra_and(SPI_REG_CTL, ~SPI_CTL_TX_RX_CNT_MASK);
 	ra_or(SPI_REG_CTL, (n_rx << 4));
-#ifdef MX_4B_MODE 
 	if (spi_chip_info && spi_chip_info->addr4b && n_tx >= 4)
 		ra_or(SPI_REG_CTL, (n_tx + 1));
 	else
-#endif
 		ra_or(SPI_REG_CTL, n_tx);
 
 	/* step 4. kick */
@@ -597,6 +583,18 @@ static int bbu_spic_trans(const u8 code, const u32 addr, u8 *buf, const size_t n
 }
 #endif // BBU_MODE //
 
+static int raspi_read_rg(u8 code, u8 *val);
+static int raspi_write_rg(u8 code, u8 *val);
+
+static int raspi_read_sr(u8 *val)
+{
+	return raspi_read_rg(OPCODE_RDSR, val);
+}
+static int raspi_write_sr(u8 *val)
+{
+	return raspi_write_rg(OPCODE_WRSR, val);
+}
+
 /*
  * read SPI flash device ID
  */
@@ -624,10 +622,9 @@ static int raspi_read_devid(u8 *rxbuf, int n_rx)
 /*
  * read status register
  */
-static int raspi_read_sr(u8 *val)
+static int raspi_read_rg(u8 code, u8 *val)
 {
 	ssize_t retval;
-	u8 code = OPCODE_RDSR;
 
 #ifdef USER_MODE
 	retval = spic_read(&code, 1, val, 1);
@@ -647,17 +644,21 @@ static int raspi_read_sr(u8 *val)
 /*
  * write status register
  */
-static int raspi_write_sr(u8 *val)
+static int raspi_write_rg(u8 code, u8 *val)
 {
 	ssize_t retval;
-	u8 code = OPCODE_WRSR;
 
 #ifdef USER_MODE
 	retval = spic_write(&code, 1, val, 1);
 #elif defined COMMAND_MODE
 	retval = raspi_cmd(code, 0, 0, val, 1, 0, SPIC_WRITE_BYTES);
 #elif defined BBU_MODE
-	retval = bbu_spic_trans(code, 0, val, 2, 0, SPIC_WRITE_BYTES);
+	{
+		// put the value to be written in address register, so it will be transfered
+		u32 address = (*val) << 24;
+		retval = bbu_spic_trans(code, address, val, 2, 0, SPIC_WRITE_BYTES);
+	}
+	return retval;
 #endif
 	if (retval != 1) {
 		printf("%s: ret: %x\n", __func__, retval);
@@ -666,7 +667,8 @@ static int raspi_write_sr(u8 *val)
 	return 0;
 }
 
-static int raspi_cear_sr(void)
+#if 0
+static int raspi_clear_sr(void)
 {
 	u8 code = OPCODE_CLSR;
 
@@ -679,8 +681,8 @@ static int raspi_cear_sr(void)
 #endif
 	return 0;
 }
+#endif
 
-#ifdef MX_4B_MODE
 static int raspi_read_scur(u8 *val)
 {
 	ssize_t retval = -1;
@@ -706,46 +708,91 @@ static int raspi_read_scur(u8 *val)
 static int raspi_4byte_mode(int enable)
 {
 	ssize_t retval;
-	u8 code;
-#ifdef COMMAND_MODE
-	u32 user;
+	
+	raspi_wait_ready(1);
+
+	if (spi_chip_info->id == 0x1) // Spansion
+	{
+		u8 br, br_cfn; // bank register
+#ifdef USER_MODE
+		if (enable)
+		{
+			br = 0x81;
+			ra_or(RT2880_SPICFG_REG, SPICFG_ADDRMODE);
+		}
+		else
+		{
+			br = 0x0;
+			ra_and(RT2880_SPICFG_REG, ~(SPICFG_ADDRMODE));
+		}
+    	
+#elif defined BBU_MODE
+		if (enable) {
+			ra_or(SPI_REG_CTL, 0x3 << 19);
+			ra_or(SPI_REG_Q_CTL, 0x3 << 8);
+			br = 0x81;
+		}
+		else {
+			ra_and(SPI_REG_CTL, ~SPI_CTL_SIZE_MASK);
+			ra_or(SPI_REG_CTL, 0x2 << 19);
+			ra_and(SPI_REG_Q_CTL, ~(0x3 << 8));
+			ra_or(SPI_REG_Q_CTL, 0x2 << 8);
+			br = 0;
+		}
+
 #endif
 
-	code = enable? 0xB7 : 0xE9; /* B7: enter 4B, E9: exit 4B */
+		raspi_write_rg(OPCODE_BRWR, &br);
+		raspi_read_rg(OPCODE_BRRD, &br_cfn);
+		if (br_cfn != br)
+		{
+			printf("4B mode switch failed %d, %x, %x\n", enable, br_cfn, br);
+			return -1;
+		}
+
+	}
+	else
+	{
+		u8 code;
+#ifdef COMMAND_MODE
+		u32 user;
+#endif
+
+		code = enable? 0xB7 : 0xE9; /* B7: enter 4B, E9: exit 4B */
 
 #ifdef USER_MODE
-	if (enable)
-		ra_or(RT2880_SPICFG_REG, SPICFG_ADDRMODE);
-	else
-		ra_and(RT2880_SPICFG_REG, ~(SPICFG_ADDRMODE));
-	retval = spic_read(&code, 1, 0, 0);
+		if (enable)
+			ra_or(RT2880_SPICFG_REG, SPICFG_ADDRMODE);
+		else
+			ra_and(RT2880_SPICFG_REG, ~(SPICFG_ADDRMODE));
+		retval = spic_read(&code, 1, 0, 0);
 #elif defined COMMAND_MODE
-	if (enable)
-		ra_or(RT2880_SPICFG_REG, SPICFG_ADDRMODE);
-	else
-		ra_and(RT2880_SPICFG_REG, ~(SPICFG_ADDRMODE));
-	user = SPIUSR_SINGLE | (SPIUSR_SINGLE << 3) | (SPIUSR_SINGLE << 6) | (SPIUSR_SINGLE << 9) | (SPIUSR_NO_DATA << 12) | (SPIUSR_NO_DUMMY << 14) | (SPIUSR_NO_MODE << 16) | (SPIUSR_NO_ADDR << 17) | (SPIUSR_ONE_INSTRU << 20) | (1 << 21);
-	retval = raspi_cmd(code, 0, 0, 0, 0, user, SPIC_USER_MODE);
+		if (enable)
+			ra_or(RT2880_SPICFG_REG, SPICFG_ADDRMODE);
+		else
+			ra_and(RT2880_SPICFG_REG, ~(SPICFG_ADDRMODE));
+		user = SPIUSR_SINGLE | (SPIUSR_SINGLE << 3) | (SPIUSR_SINGLE << 6) | (SPIUSR_SINGLE << 9) | (SPIUSR_NO_DATA << 12) | (SPIUSR_NO_DUMMY << 14) | (SPIUSR_NO_MODE << 16) | (SPIUSR_NO_ADDR << 17) | (SPIUSR_ONE_INSTRU << 20) | (1 << 21);
+		retval = raspi_cmd(code, 0, 0, 0, 0, user, SPIC_USER_MODE);
 #elif defined BBU_MODE
-	if (enable) {
-		ra_or(SPI_REG_CTL, 0x3 << 19);
-		ra_or(SPI_REG_Q_CTL, 0x3 << 8);
-	}
-	else {
-		ra_and(SPI_REG_CTL, ~SPI_CTL_SIZE_MASK);
-		ra_or(SPI_REG_CTL, 0x2 << 19);
-		ra_and(SPI_REG_Q_CTL, ~(0x3 << 8));
-		ra_or(SPI_REG_Q_CTL, 0x2 << 8);
-	}
-	retval = bbu_spic_trans(code, 0, NULL, 1, 0, 0);
+		if (enable) {
+			ra_or(SPI_REG_CTL, 0x3 << 19);
+			ra_or(SPI_REG_Q_CTL, 0x3 << 8);
+		}
+		else {
+			ra_and(SPI_REG_CTL, ~SPI_CTL_SIZE_MASK);
+			ra_or(SPI_REG_CTL, 0x2 << 19);
+			ra_and(SPI_REG_Q_CTL, ~(0x3 << 8));
+			ra_or(SPI_REG_Q_CTL, 0x2 << 8);
+		}
+		retval = bbu_spic_trans(code, 0, NULL, 1, 0, 0);
 #endif
-	if (retval != 0) {
-		printf("%s: ret: %x\n", __func__, retval);
-		return -1;
+		if (retval != 0) {
+			printf("%s: ret: %x\n", __func__, retval);
+			return -1;
+		}
 	}
 	return 0;
 }
-#endif // MX_4B_MODE //
 
 /*
  * Set write enable latch with Write Enable command.
@@ -810,14 +857,14 @@ static int raspi_wait_ready(int sleep_ms)
 	/* one chip guarantees max 5 msec wait here after page writes,
 	 * but potentially three seconds (!) after page erase.
 	 */
-	for (count = 0; count < ((sleep_ms+1) *1000); count++) {
+	for (count = 0; count < ((sleep_ms+1) *1000*500); count++) {
 		if ((raspi_read_sr((u8 *)&sr)) < 0)
 			break;
-		else if (!(sr & (SR_WIP | SR_EPE | SR_WEL))) {
+		else if (!(sr & SR_WIP)) {
 			return 0;
 		}
 
-		udelay(500);
+		udelay(1);
 		/* REVISIT sometimes sleeping would be best */
 	}
 
@@ -846,9 +893,9 @@ static int raspi_erase_sector(u32 offset)
 	raspi_unprotect();
 
 #ifdef USER_MODE
-#ifdef MX_4B_MODE
 	if (spi_chip_info->addr4b) {
 		raspi_4byte_mode(1);
+		raspi_write_enable();
 		buf[0] = OPCODE_SE;
 		buf[1] = offset >> 24;
 		buf[2] = offset >> 16;
@@ -858,7 +905,6 @@ static int raspi_erase_sector(u32 offset)
 		raspi_4byte_mode(0);
 		return 0;
 	}
-#endif // MX_4B_MODE //
 
 	/* Set up command buffer. */
 	buf[0] = OPCODE_SE;
@@ -867,29 +913,32 @@ static int raspi_erase_sector(u32 offset)
 	buf[3] = offset;
 
 	spic_write(buf, 4, 0, 0);
+	raspi_wait_ready(950);
 #elif defined COMMAND_MODE
 	if (spi_chip_info->addr4b)
 	{
 		raspi_4byte_mode(1);
+		raspi_write_enable();
 		raspi_cmd(OPCODE_SE, offset, 0, 0, 0, 0, SPIC_4B_ADDR);
 	}
 	else
 		raspi_cmd(OPCODE_SE, offset, 0, 0, 0, 0, 0);
+	raspi_wait_ready(950);
 
 	if (spi_chip_info->addr4b)
 	{
 		raspi_4byte_mode(0);
 	}
 #elif defined BBU_MODE
-#ifdef MX_4B_MODE 
 	if (spi_chip_info->addr4b)
+	{
 		raspi_4byte_mode(1);
-#endif
+		raspi_write_enable();
+	}
 	bbu_spic_trans(STM_OP_SECTOR_ERASE, offset, NULL, 4, 0, 0);
-#ifdef MX_4B_MODE 
+	raspi_wait_ready(950);
 	if (spi_chip_info->addr4b)
 		raspi_4byte_mode(0);
-#endif
 #endif
 
 	raspi_write_disable();
@@ -996,7 +1045,6 @@ int raspi_read(char *buf, unsigned int from, int len)
 
 	/* Set up the write data buffer. */
 	cmd[0] = OPCODE_READ;
-#ifdef MX_4B_MODE
 	if (spi_chip_info->addr4b) {
 		raspi_4byte_mode(1);
 		cmd[1] = from >> 24;
@@ -1007,7 +1055,6 @@ int raspi_read(char *buf, unsigned int from, int len)
 		raspi_4byte_mode(0);
 	}
 	else
-#endif
 	{
 		cmd[1] = from >> 16;
 		cmd[2] = from >> 8;
@@ -1049,10 +1096,8 @@ int raspi_read(char *buf, unsigned int from, int len)
 	}
 
 #elif defined BBU_MODE
-#ifdef MX_4B_MODE 
 	if (spi_chip_info->addr4b)
 		raspi_4byte_mode(1);
-#endif
 	do {
 		int rc, more;
 #ifdef MORE_BUF_MODE
@@ -1086,10 +1131,8 @@ int raspi_read(char *buf, unsigned int from, int len)
 			from += more;
 		}
 	} while (rdlen < len);
-#ifdef MX_4B_MODE 
 	if (spi_chip_info->addr4b)
 		raspi_4byte_mode(0);
-#endif
 #endif
 
 	return rdlen;
@@ -1121,7 +1164,6 @@ int raspi_write(char *buf, unsigned int to, int len)
 #ifdef USER_MODE
 	/* Set up the opcode in the write buffer. */
 	cmd[0] = OPCODE_PP;
-#ifdef MX_4B_MODE
 	if (spi_chip_info->addr4b) {
 		cmd[1] = to >> 24;
 		cmd[2] = to >> 16;
@@ -1129,7 +1171,6 @@ int raspi_write(char *buf, unsigned int to, int len)
 		cmd[4] = to;
 	}
 	else
-#endif
 	{
 		cmd[1] = to >> 16;
 		cmd[2] = to >> 8;
@@ -1140,10 +1181,8 @@ int raspi_write(char *buf, unsigned int to, int len)
 	/* what page do we start with? */
 	page_offset = to % FLASH_PAGESIZE;
 
-#ifdef MX_4B_MODE
 	if (spi_chip_info->addr4b)
 		raspi_4byte_mode(1);
-#endif
 
 	/* write everything in PAGESIZE chunks */
 	while (len > 0) {
@@ -1152,7 +1191,6 @@ int raspi_write(char *buf, unsigned int to, int len)
 
 		/* write the next page to flash */
 #ifdef USER_MODE
-#ifdef MX_4B_MODE
 		if (spi_chip_info->addr4b) {
 			cmd[1] = to >> 24;
 			cmd[2] = to >> 16;
@@ -1160,7 +1198,6 @@ int raspi_write(char *buf, unsigned int to, int len)
 			cmd[4] = to;
 		}
 		else
-#endif
 		{
 			cmd[1] = to >> 16;
 			cmd[2] = to >> 8;
@@ -1174,11 +1211,9 @@ int raspi_write(char *buf, unsigned int to, int len)
 
 #ifdef USER_MODE
 
-#ifdef MX_4B_MODE
 		if (spi_chip_info->addr4b)
 			rc = spic_write(cmd, 5, buf, page_size);
 		else
-#endif
 			rc = spic_write(cmd, 4, buf, page_size);
 
 #elif defined COMMAND_MODE
@@ -1233,7 +1268,7 @@ int raspi_write(char *buf, unsigned int to, int len)
 			}
 			if (wrlen > 0) {
 				raspi_write_disable();
-				raspi_wait_ready(3);
+				raspi_wait_ready(100);
 				raspi_write_enable();
 			}
 		} while (wrlen > 0);
@@ -1256,11 +1291,10 @@ int raspi_write(char *buf, unsigned int to, int len)
 		to += page_size;
 		buf += page_size;
 	}
+	raspi_wait_ready(100);
 	printf("\n");
-#ifdef MX_4B_MODE
 	if (spi_chip_info->addr4b)
 		raspi_4byte_mode(0);
-#endif
 
 	raspi_write_disable();
 
@@ -1399,6 +1433,7 @@ int raspi_erase_write(char *buf, unsigned int offs, int count)
 
 extern ulong NetBootFileXferSize;
 
+#ifdef RALINK_CMDLINE
 int do_mem_cp(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 {
 	unsigned int addr, dest;
@@ -1555,7 +1590,6 @@ int ralink_spi_command(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 			}
 		}
 	}
-#ifdef MX_4B_MODE
 	else if (!strncmp(argv[1], "scur", 2)) {
 		u8 scur;
 		if (argv[2][0] == 'r') {
@@ -1565,7 +1599,6 @@ int ralink_spi_command(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 				printf("scur %d\n", scur);
 		}
 	}
-#endif
 	else
 		printf("Usage:\n%s\n use \"help spi\" for detail!\n", cmdtp->usage);
 	return 0;
@@ -1583,5 +1616,5 @@ U_BOOT_CMD(
 	"  spi write <offs> <hex_str_value>\n"
 );
 #endif
-
+#endif // RALINK_CMDLINE //
 #endif

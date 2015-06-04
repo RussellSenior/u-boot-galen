@@ -324,7 +324,7 @@ TftpStart (void)
 	TftpStarted=1;
 
 	if (BootFile[0] == '\0') {
-	    sprintf(default_filename, "%s","root_uImage");
+	    sprintf(default_filename, "%s","test.bin");
 	    tftp_filename = default_filename;
 
 		printf ("*** Warning: no boot file name; using '%s'\n",
