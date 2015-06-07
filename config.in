@@ -3,7 +3,7 @@ comment ""
 
 mainmenu_name 'Uboot Configuration'
 choice 'Chip Type' "ASIC ASIC_BOARD 
-                   "
+                   " ASIC
 
 if [ "$FPGA_BOARD" = "y" ]; then
 choice 'Chip ID'	 "RT2880 RT2880_FPGA_BOARD \
@@ -24,7 +24,7 @@ choice 'Chip ID'	" RT2880 RT2880_ASIC_BOARD \
                           RT5350 RT5350_ASIC_BOARD \
                           RT6855A RT6855A_ASIC_BOARD \
                           MT7620 MT7620_ASIC_BOARD
-                         "
+                         " RT5350
 fi
 
 #########################################################################################3
@@ -527,7 +527,7 @@ choice 'DRAM Component' "64Mb ON_BOARD_64M_DRAM_COMPONENT \
                          128Mb ON_BOARD_128M_DRAM_COMPONENT \
                          256Mb ON_BOARD_256M_DRAM_COMPONENT \
                          512Mb ON_BOARD_512M_DRAM_COMPONENT 
-		      " 128Mb
+		      " 256Mb
 
 define_bool ON_BOARD_16BIT_DRAM_BUS y
 
@@ -557,6 +557,12 @@ bool "CPU PLL adjustment" CPU_PLL_PARAMETERS
 if [ "$CPU_PLL_PARAMETERS" = "y" ]; then
 hex " CPU PLL ADJUSTMENT "	CPUPLLCFG	0
 fi
+
+# Really want a bool that defaults to true, but that doesn't appear to be
+# possible in this version of menuconfig.
+choice 'MTH WiFi' "WiFi MTH_WIFI \
+                   other MTH_other \
+                  " WiFi
 
 define_hex TEXT_BASE  0x80200000
 
