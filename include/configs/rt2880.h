@@ -75,7 +75,7 @@
 
 #define SERIAL_CLOCK_DIVISOR 16
 
-#define CONFIG_BOOTDELAY	5	/* autoboot after 5 seconds	*/
+#define CONFIG_BOOTDELAY	2	/* autoboot after 2 seconds	*/
 
 #define CONFIG_BAUDRATE		57600
 
