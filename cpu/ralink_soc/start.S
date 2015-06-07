@@ -1797,6 +1797,17 @@ tRFCinit:
 #endif
 #endif
 
+#if defined(MTH_WIFI)
+	/* enable normal function spi, uartl, ephy LED */
+	and t6, ~(0x3<<14)
+	or t6, (0x1<<6)
+	and t6, ~(0x1<<5)
+	and t6, ~(0x1<<1)
+	or t6, (0x1<<0)
+	//configure UARTF pin to gpio mode (GPIO7~GPIO14)
+	or t6, 0x1c
+#endif
+
 #if defined(MT7620_ASIC_BOARD)
 #if defined(P5_MAC_TO_PHY_MODE)
 	//set mdio pin to normal mode
@@ -1856,6 +1867,11 @@ tRFCinit:
 	sw t6, 0(t5)
 	nop
 #endif
+
+/* For MTH_WIFI, leave all GPIO as inputs to avoid bus conflicts.
+   Alternate functions such as UART, SPI, etc. override the direction
+   register, so it is not necessary to set those pins as outputs. */
+#if (!defined(MTH_WIFI))
 	/* SPI_HOLD should not set as GPIO output */	
 	//set all GPIO to output high
         li t5, RALINK_PIO_BASE + 0x24
@@ -1873,7 +1889,8 @@ tRFCinit:
         nop
         sw t6, 0(t5)
         nop
-		
+#endif
+
 #if defined(RT3052_ASIC_BOARD) || defined (RT3052_FPGA_BOARD)
 #if defined(ON_BOARD_16BIT_DRAM_BUS)
 	//if sdram bus is 16bits,set gpio24~gpio39 to output high
