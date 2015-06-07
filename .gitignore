@@ -1,0 +1,15 @@
+.config
+.tmp_config
+autoconf.h
+mkimage
+u-boot
+
+*~
+*.o
+*.a
+*.bin
+*.img
+*.srec
+*.map
+*.log
+.depend
