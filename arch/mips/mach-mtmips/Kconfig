@@ -61,6 +61,15 @@ endchoice
 choice
 	prompt "Board select"
 
+config BOARD_ASIARF_AWM688
+	bool "AsiaRF AWM688"
+	depends on SOC_MT7628
+	help
+	  The AsiaRF AWM688 board is based on the MT7688 SoC.  The board
+	  has 64/128 MiB of RAM, 8/16 MiB of SPI NOR flash, an integrated
+	  ethernet switch with 5 ports (4 ports are shared with other
+	  peripherals), 1 USB port, 2 UARTs, GPIOs, I2C, and I2S.
+
 config BOARD_GARDENA_SMART_GATEWAY_MT7688
 	bool "GARDENA smart Gateway"
 	depends on SOC_MT7628
@@ -106,6 +115,7 @@ config SPL_UART2_SPIS_PINMUX
 	  Select this if the UART2 of your board is connected to GPIO 16/17
 	  (shared with SPIS) rather than the usual GPIO 20/21.
 
+source "board/asiarf/awm688/Kconfig"
 source "board/gardena/smart-gateway-mt7688/Kconfig"
 source "board/mediatek/mt7628/Kconfig"
 source "board/seeed/linkit-smart-7688/Kconfig"

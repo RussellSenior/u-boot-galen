@@ -1,0 +1,12 @@
+if BOARD_ASIARF_AWM688
+
+config SYS_BOARD
+	default "awm688"
+
+config SYS_VENDOR
+	default "asiarf"
+
+config SYS_CONFIG_NAME
+	default "awm688"
+
+endif

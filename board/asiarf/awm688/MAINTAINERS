@@ -1,0 +1,7 @@
+ASIARF_AWM688 BOARD
+M:	Galen Seitz <galens@seitzassoc.com>
+S:	Maintained
+F:	board/asiarf/awm688
+F:	include/configs/awm688.h
+F:	configs/awm688_defconfig
+F:	arch/mips/dts/asiarf,awm688.dts
