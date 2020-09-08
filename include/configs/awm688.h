@@ -6,6 +6,10 @@
 #ifndef __CONFIG_AWM688_H
 #define __CONFIG_AWM688_H
 
+#define CONFIG_EXTRA_ENV_SETTINGS					\
+	"boot_flash=bootm bc050000\0"					\
+	""
+
 /* CPU */
 #define CONFIG_SYS_MIPS_TIMER_FREQ	290000000
 
