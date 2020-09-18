@@ -32,7 +32,7 @@ CONFIG_CMD_DHCP=y
 CONFIG_CMD_PING=y
 CONFIG_CMD_MTDPARTS=y
 CONFIG_MTDIDS_DEFAULT="nor0=spi0.0"
-CONFIG_MTDPARTS_DEFAULT="spi0.0:192k(u-boot),64k(u-boot-env),64k(factory),16064k(firmware)"
+CONFIG_MTDPARTS_DEFAULT="spi0.0:192k(u-boot),64k(u-boot-env),64k(factory),-(firmware)"
 # CONFIG_ISO_PARTITION is not set
 CONFIG_DEFAULT_DEVICE_TREE="asiarf,awm688"
 CONFIG_ENV_IS_IN_SPI_FLASH=y
