@@ -6,8 +6,11 @@
 #ifndef __CONFIG_AWM688_H
 #define __CONFIG_AWM688_H
 
-#define CONFIG_EXTRA_ENV_SETTINGS					\
-	"boot_flash=bootm bc050000\0"					\
+#define CONFIG_EXTRA_ENV_SETTINGS													\
+	"button=pb8\0"															\
+	"led=pa22\0"															\
+	"boot_dhcp=gpio set $led ; until dhcp ; do echo DHCP timed out ; sleep 2 ; done && source $fileaddr || bootm $fileaddr\0"	\
+	"boot_flash=bootm bc050000\0"													\
 	""
 
 /* CPU */
@@ -16,7 +19,7 @@
 /* RAM */
 #define CONFIG_SYS_SDRAM_BASE		0x80000000
 
-#define CONFIG_SYS_LOAD_ADDR		CONFIG_SYS_SDRAM_BASE + 0x100000
+#define CONFIG_SYS_LOAD_ADDR		CONFIG_SYS_SDRAM_BASE + 0x400000
 
 #define CONFIG_SYS_INIT_SP_OFFSET	0x400000
 
@@ -56,6 +59,7 @@
 
 /* U-Boot */
 #define CONFIG_SYS_MONITOR_BASE		CONFIG_SYS_TEXT_BASE
+#define CONFIG_SYS_BOOTM_LEN		(16 << 20)
 
 /* Environment settings */
 
